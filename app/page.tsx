@@ -1,101 +1,885 @@
-import Image from "next/image";
+"use client";
+import { useState, useEffect } from 'react';
+import { 
+  FaFolder, 
+  FaFileImage, 
+  FaFilePdf, 
+  FaFileWord, 
+  FaFileExcel, 
+  FaFilePowerpoint, 
+  FaFileAudio, 
+  FaFileVideo, 
+  FaFileArchive, 
+  FaFile,
+  FaDownload,
+  FaCopy,
+  FaTrash,
+  FaUpload,
+  FaSort,
+  FaSortUp,
+  FaSortDown,
+  FaPlay
+} from 'react-icons/fa';
+import Link from 'next/link';
+import FilePreviewSidebar from '../components/FilePreviewSidebar';
+import { getFileType } from '../app/utils/fileHandler';
+
+export interface FileSystemItem {
+  name: string;
+  type: 'folder' | 'file';
+  size: string;
+  updated: string;
+  children?: { [key: string]: FileSystemItem };
+  metadata?: FileMetadata;
+}
+
+export interface FileMetadata {
+  name: string;
+  bucket: string;
+  generation: string;
+  metageneration: string;
+  contentType: string;
+  storageClass: string;
+  size: string;
+  md5Hash: string;
+  crc32c: string;
+  etag: string;
+  timeCreated: string;
+  updated: string;
+  timeStorageClassUpdated: string;
+  timeFinalized: string;
+}
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [selectedFolder, setSelectedFolder] = useState('');
+  const [selectedFile, setSelectedFile] = useState<FileSystemItem | null>(null);
+  const [sortConfig, setSortConfig] = useState<{
+    key: string;
+    direction: 'asc' | 'desc' | null;
+  }>({ key: '', direction: null });
+  const [currentPath, setCurrentPath] = useState<string>('');
+  const [folders, setFolders] = useState<Array<{
+    name: string;
+    size: string;
+    updated: string;
+  }>>([]);
+  const [isFileModalOpen, setIsFileModalOpen] = useState(false);
+  const [fileContent, setFileContent] = useState<any>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [fileStructure, setFileStructure] = useState<{ [key: string]: FileSystemItem }>({});
+  const [currentItems, setCurrentItems] = useState<FileSystemItem[]>([]);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [previewModal, setPreviewModal] = useState<{
+    isOpen: boolean;
+    url: string;
+    type: string;
+    fileName: string;
+  }>({
+    isOpen: false,
+    url: '',
+    type: '',
+    fileName: ''
+  });
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  // Update useEffect to fetch data when path changes
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pathFromUrl = params.get('path') || '';
+    setCurrentPath(pathFromUrl);
+
+    const fetchData = async () => {
+      try {
+        // Determine if the path points to a file
+        const isFile = pathFromUrl.includes('.');
+        const endpoint = '/api/folders';
+        
+        const response = await fetch(`${endpoint}?prefix=${encodeURIComponent(pathFromUrl)}`);
+        const data = await response.json();
+
+        if (isFile) {
+          setFileContent(data);
+          setIsFileModalOpen(true);
+        } else {
+          setFolders(data);
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        // You might want to add error state handling here
+      }
+    };
+
+    fetchData();
+  }, [currentPath]);
+
+  // Close preview when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const sidebar = document.getElementById('file-preview-sidebar');
+      if (sidebar && !sidebar.contains(e.target as Node)) {
+        setSelectedFile(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Sorting function
+  const sortItems = (items: typeof folders) => {
+    if (!sortConfig.key || !sortConfig.direction) return items;
+
+    return [...items].sort((a, b) => {
+      if (a[sortConfig.key as keyof typeof a] < b[sortConfig.key as keyof typeof b]) {
+        return sortConfig.direction === 'asc' ? -1 : 1;
+        
+      }
+      if (a[sortConfig.key as keyof typeof a] > b[sortConfig.key as keyof typeof b]) {
+        return sortConfig.direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+  };
+
+  // Request sort function
+  const requestSort = (key: string) => {
+    let direction: 'asc' | 'desc' | null = 'asc';
+    
+    if (sortConfig.key === key) {
+      if (sortConfig.direction === 'asc') {
+        direction = 'desc';
+      } else if (sortConfig.direction === 'desc') {
+        direction = null;
+      }
+    }
+    
+    setSortConfig({ key, direction });
+  };
+
+  // Get sort icon
+  const getSortIcon = (columnKey: string) => {
+    if (sortConfig.key !== columnKey) {
+      return <FaSort className="ml-2 inline-block opacity-30" />;
+    }
+    if (sortConfig.direction === 'asc') {
+      return <FaSortUp className="ml-2 inline-block" />;
+    }
+    if (sortConfig.direction === 'desc') {
+      return <FaSortDown className="ml-2 inline-block" />;
+    }
+    return <FaSort className="ml-2 inline-block opacity-30" />;
+  };
+
+  // Filter and sort folders
+  const filteredAndSortedFolders = sortItems(
+    folders.filter(folder =>
+      folder.name.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  );
+
+  // Update pagination to use sorted items
+  const totalPages = Math.ceil(filteredAndSortedFolders.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedFolders = filteredAndSortedFolders.slice(startIndex, startIndex + itemsPerPage);
+
+  // Handle page change
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    // Update URL with page number
+    const url = new URL(window.location.href);
+    url.searchParams.set('page', page.toString());
+    window.history.pushState({}, '', url);
+  };
+
+  const getFileIcon = (fileName: string, isFolder: boolean) => {
+    const extension = fileName.split('.').pop()?.toLowerCase();
+    
+    // If no extension, assume it's a folder
+    if (!extension || fileName.indexOf('.') === -1) {
+      return <FaFolder className="text-yellow-500 text-xl" />;
+    }
+
+    // Map extensions to icons
+    switch (extension) {
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+      case 'gif':
+      case 'svg':
+        return <FaFileImage className="text-blue-500 text-xl" />;
+      case 'pdf':
+        return <FaFilePdf className="text-red-500 text-xl" />;
+      case 'doc':
+      case 'docx':
+        return <FaFileWord className="text-blue-600 text-xl" />;
+      case 'xls':
+      case 'xlsx':
+        return <FaFileExcel className="text-green-600 text-xl" />;
+      case 'ppt':
+      case 'pptx':
+        return <FaFilePowerpoint className="text-orange-600 text-xl" />;
+      case 'mp3':
+      case 'wav':
+        return <FaFileAudio className="text-purple-500 text-xl" />;
+      case 'mp4':
+      case 'mov':
+      case 'avi':
+        return <FaFileVideo className="text-indigo-500 text-xl" />;
+      case 'zip':
+      case 'rar':
+      case '7z':
+        return <FaFileArchive className="text-gray-500 text-xl" />;
+      default:
+        return <FaFile className="text-gray-400 text-xl" />;
+    }
+  };
+
+  // Generate breadcrumbs from currentPath
+  const getBreadcrumbs = () => {
+    const parts = currentPath.split('/').filter(Boolean);
+    return [
+      { name: 'Home', path: '' },
+      ...parts.map((part, index) => ({
+        name: part,
+        path: parts.slice(0, index + 1).join('/')
+      }))
+    ];
+  };
+
+  // Add File Modal component
+  const FileModal = () => (
+    <dialog id="file_modal" className={`modal ${isFileModalOpen ? 'modal-open' : ''}`}>
+      <div className="modal-box">
+        <h3 className="font-bold text-lg mb-4">File Preview</h3>
+        <div className="max-h-96 overflow-auto">
+          <pre className="whitespace-pre-wrap">
+            {JSON.stringify(fileContent, null, 2)}
+          </pre>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        <div className="modal-action">
+          <button 
+            className="btn"
+            onClick={() => setIsFileModalOpen(false)}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+      <form method="dialog" className="modal-backdrop">
+        <button onClick={() => setIsFileModalOpen(false)}>close</button>
+      </form>
+    </dialog>
+  );
+
+  // Fetch file structure data
+  useEffect(() => {
+    const fetchFileStructure = async () => {
+      try {
+        const response = await fetch('/api/file-structure');
+        const data = await response.json();
+        setFileStructure(data);
+        
+        // Set initial items based on current path
+        updateCurrentItems(data, currentPath);
+      } catch (error) {
+        console.error('Error fetching file structure:', error);
+      }
+    };
+
+    fetchFileStructure();
+  }, []);
+
+  // Update displayed items when path changes
+  useEffect(() => {
+    updateCurrentItems(fileStructure, currentPath);
+  }, [currentPath, fileStructure]);
+
+  const updateCurrentItems = (structure: typeof fileStructure, path: string) => {
+    let current = structure;
+    const pathParts = path.split('/').filter(Boolean);
+    
+    // Navigate to current folder
+    for (const part of pathParts) {
+      if (current[part]?.children) {
+        current = current[part].children!;
+      } else {
+        break;
+      }
+    }
+
+    // Convert current level object to array
+    const items = Object.entries(current).map(([key, value]) => ({
+      ...value,
+      name: key
+    }));
+
+    setCurrentItems(items);
+  };
+
+  const handleItemClick = (item: FileSystemItem) => {
+    if (item.type === 'folder') {
+      const newPath = currentPath 
+        ? `${currentPath}/${item.name}`
+        : item.name;
+      
+      setCurrentPath(newPath);
+      const url = new URL(window.location.href);
+      url.searchParams.set('path', newPath);
+      window.history.pushState({}, '', url);
+    } else {
+      setSelectedFile(item as FileSystemItem);
+    }
+  };
+
+  const handleDownload = async (folder: typeof folders[0]) => {
+    try {
+      const filePath = currentPath 
+        ? `${currentPath}/${folder.name}`
+        : folder.name;
+        
+      const response = await fetch(`/api/download?path=${encodeURIComponent(filePath)}`);
+      const data = await response.json();
+      
+      if (data.url) {
+        // Open the signed URL in a new tab or trigger download
+        window.open(data.url, '_blank');
+      }
+    } catch (error) {
+      console.error('Error downloading file:', error);
+    }
+  };
+
+  const handleUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const fileInput = form.querySelector('input[type="file"]') as HTMLInputElement;
+    const urlInput = form.querySelector('input[name="httpUrl"]') as HTMLInputElement;
+    const folderNameInput = form.querySelector('input[type="text"]') as HTMLInputElement;
+    
+    let targetFolder = folderNameInput.value || selectedFolder || '';
+    
+    if (!targetFolder) {
+      targetFolder = '';
+    }
+
+    // Check if we're uploading via URL or file
+    if (urlInput.value) {
+      try {
+        setIsUploading(true);
+        const response = await fetch('/api/transfer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sourceUrl: urlInput.value,
+            folderName: targetFolder,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Transfer request failed');
+        }
+
+        const data = await response.json();
+        console.log('Transfer initiated:', data);
+        setIsUploadModalOpen(false);
+      } catch (error) {
+        console.error('Transfer failed:', error);
+        alert(`Transfer failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } finally {
+        setIsUploading(false);
+      }
+      return;
+    }
+
+    // Existing file upload logic
+    if (!fileInput.files?.length) {
+      alert('Please select a file or provide an HTTP URL');
+      return;
+    }
+
+    const file = fileInput.files[0];
+    
+    try {
+      setIsUploading(true);
+      console.log('Getting presigned URL for:', file.name, 'in folder:', targetFolder, 'type:', file.type);
+      
+      // Get presigned URL with content type
+      const presignedUrlResponse = await fetch('/api/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          folderName: targetFolder,
+          contentType: file.type // Add content type to the request
+        }),
+      });
+
+      if (!presignedUrlResponse.ok) {
+        const errorData = await presignedUrlResponse.json();
+        throw new Error(`Failed to get presigned URL: ${JSON.stringify(errorData)}`);
+      }
+
+      const { uploadUrl } = await presignedUrlResponse.json();
+      console.log('Received presigned URL:', uploadUrl);
+
+      // Upload file with progress tracking using XMLHttpRequest
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const progress = (event.loaded / event.total) * 100;
+            setUploadProgress(Math.round(progress));
+          }
+        });
+
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            console.log('Upload completed successfully');
+            resolve(xhr.response);
+          } else {
+            console.error('Upload failed with status:', xhr.status);
+            console.error('Response:', xhr.responseText);
+            reject(new Error(`Upload failed with status: ${xhr.status}`));
+          }
+        });
+
+        xhr.addEventListener('error', (e) => {
+          console.error('XHR error:', e);
+          reject(new Error('Network error during upload'));
+        });
+
+        xhr.open('PUT', uploadUrl);
+        xhr.setRequestHeader('Content-Type', file.type);
+        // Add content length header
+        xhr.setRequestHeader('Content-Length', file.size.toString());
+        console.log('Starting upload with content-type:', file.type, 'size:', file.size);
+        xhr.send(file);
+      });
+
+      console.log('Upload completed, refreshing folders');
+      // await refreshFolders();
+      setIsUploadModalOpen(false);
+      setUploadProgress(0);
+    } catch (error) {
+      console.error('Upload failed:', error);
+      alert(`Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleFilePreview = async (
+    item: FileSystemItem, 
+    currentPath: string, 
+    onPreviewOpen: (url: string, type: string) => void
+  ) => {
+    try {
+      const filePath = currentPath 
+        ? `${currentPath}/${item.name}`
+        : item.name;
+      
+      const response = await fetch(`/api/download?path=${encodeURIComponent(filePath)}`);
+      const data = await response.json();
+      
+      if (data.url) {
+        const fileType = getFileType(item.name);
+        onPreviewOpen(data.url, fileType);
+      }
+    } catch (error) {
+      console.error('Error getting file preview:', error);
+    }
+  };
+
+  const handleDelete = async (item: FileSystemItem) => {
+    if (!confirm(`Are you sure you want to delete "${item.name}"?`)) {
+      return;
+    }
+
+    try {
+      const filePath = currentPath 
+        ? `${currentPath}/${item.name}`
+        : item.name;
+      console.log('Deleting file:', filePath);
+      const response = await fetch(`/api/${filePath}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete file');
+      }
+
+      // Refresh the current items list
+      const fetchFileStructure = async () => {
+        const response = await fetch('/api/file-structure');
+        const data = await response.json();
+        setFileStructure(data);
+        updateCurrentItems(data, currentPath);
+      };
+
+      await fetchFileStructure();
+    } catch (error) {
+      console.error('Error deleting file:', error);
+      alert('Failed to delete file');
+    }
+  };
+
+  return (
+    <div className="flex h-screen bg-base-100">
+      <div className="flex-1 p-2 sm:p-6 flex flex-col">
+        {/* Header section */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+          <div className="flex items-center space-x-2 w-full sm:w-auto">
+            <div className="breadcrumbs text-base-content text-sm sm:text-base">
+              <ul>
+                {getBreadcrumbs().map((crumb, index) => (
+                  <li key={index}>
+                    <Link 
+                      href={`/?path=${crumb.path}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setCurrentPath(crumb.path);
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('path', crumb.path);
+                        window.history.pushState({}, '', url);
+                      }}
+                    >
+                      {crumb.name}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center space-y-2 sm:space-y-0 sm:space-x-4 w-full sm:w-auto">
+            <div className="relative flex-1 sm:flex-none">
+              <input
+                type="search"
+                placeholder="Search Your Files"
+                className="input input-bordered w-full sm:w-64 bg-base-200 text-base-content"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <button 
+              className="btn btn-primary btn-outline"
+              onClick={() => setIsUploadModalOpen(true)}
+            >
+              <FaUpload className="mr-2" /> Upload
+            </button>
+          </div>
+        </div>
+
+        {/* Upload Modal */}
+        <dialog id="upload_modal" className={`modal ${isUploadModalOpen ? 'modal-open' : ''}`}>
+          <div className="modal-box">
+            <h3 className="font-bold text-lg mb-4">Upload File</h3>
+            <form onSubmit={handleUpload} className="space-y-4">
+              <div className="form-control w-full">
+                <label className="label">
+                  <span className="label-text">Select Folder</span>
+                </label>
+                <select 
+                  className="select select-bordered w-full"
+                  value={selectedFolder}
+                  onChange={(e) => setSelectedFolder(e.target.value)}
+                >
+                  <option value="" disabled>Select a folder</option>
+                  {folders
+                    .filter(f => !f.name.includes('.'))
+                    .map((folder, index) => (
+                      <option key={index} value={folder.name}>
+                        {folder.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="form-control w-full">
+                <label className="label">
+                  <span className="label-text">Or Create New Folder</span>
+                </label>
+                <input 
+                  type="text"
+                  placeholder="Enter folder name" 
+                  className="input input-bordered w-full" 
+                />
+              </div>
+              
+              <div className="form-control w-full">
+                <label className="label">
+                  <span className="label-text">HTTP URL</span>
+                </label>
+                <input 
+                  type="url"
+                  name="httpUrl"
+                  placeholder="Enter HTTP URL to transfer" 
+                  className="input input-bordered w-full" 
+                />
+                <label className="label">
+                  <span className="label-text-alt">OR</span>
+                </label>
+              </div>
+
+              <div className="form-control w-full">
+                <label className="label">
+                  <span className="label-text">Upload File</span>
+                </label>
+                <input 
+                  type="file" 
+                  className="file-input file-input-bordered w-full" 
+                />
+              </div>
+
+              <div className="modal-action">
+                <button 
+                  type="submit" 
+                  className="btn btn-primary"
+                  disabled={isUploading}
+                >
+                  {isUploading ? 'Processing...' : 'Upload'}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setIsUploadModalOpen(false)}
+                  disabled={isUploading}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+          <form method="dialog" className="modal-backdrop">
+            <button onClick={() => setIsUploadModalOpen(false)}>close</button>
+          </form>
+        </dialog>
+
+        {/* Table with vertical scroll */}
+        <div className="flex-1 overflow-hidden flex flex-col bg-base-200 rounded-lg">
+          <div className="overflow-y-auto flex-1">
+            <table className="table w-full">
+              {/* Sticky Header */}
+              <thead className="sticky top-0 z-10">
+                <tr className="text-base-content">
+                  <th 
+                    className="bg-base-300 cursor-pointer hover:bg-base-200"
+                    onClick={() => requestSort('name')}
+                  >
+                    <div className="flex items-center">
+                      NAME
+                      {getSortIcon('name')}
+                    </div>
+                  </th>
+                  <th 
+                    className="bg-base-300 hidden sm:table-cell cursor-pointer hover:bg-base-200"
+                    onClick={() => requestSort('size')}
+                  >
+                    <div className="flex items-center">
+                      SIZE
+                      {getSortIcon('size')}
+                    </div>
+                  </th>
+                  <th 
+                    className="bg-base-300 hidden md:table-cell cursor-pointer hover:bg-base-200"
+                    onClick={() => requestSort('updated')}
+                  >
+                    <div className="flex items-center">
+                      LAST CHANGED
+                      {getSortIcon('updated')}
+                    </div>
+                  </th>
+                  <th className="bg-base-300">ACTIONS</th>
+                </tr>
+              </thead>
+              {/* Table body */}
+              <tbody>
+                {currentItems.map((item, index) => (
+                  <tr key={index} className="hover:bg-base-300">
+                    <td className="flex items-center">
+                      <div 
+                        onClick={() => handleItemClick(item)}
+                        className="flex items-center hover:cursor-pointer"
+                      >
+                        {getFileIcon(item.name, item.type === 'folder')}
+                        <span className="ml-2 text-base-content truncate max-w-[150px] sm:max-w-[300px]">
+                          {item.name}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="text-base-content hidden sm:table-cell">
+                      {item.size || '-'}
+                    </td>
+                    <td className="text-base-content hidden md:table-cell">
+                      {item.updated || '-'}
+                    </td>
+                    <td className="w-[120px] sm:w-[200px]">
+                      <div className="flex gap-1 sm:gap-2">
+                        {['video', 'image', 'pdf', 'audio'].includes(getFileType(item.name)) && (
+                          <button 
+                            className="btn btn-ghost btn-sm text-base-content"
+                            onClick={() => handleFilePreview(
+                              item,
+                              currentPath,
+                              (url, type) => setPreviewModal({
+                                isOpen: true,
+                                url,
+                                type,
+                                fileName: item.name
+                              })
+                            )}
+                          >
+                            <FaPlay className="h-4 w-4 sm:h-5 sm:w-5" />
+                          </button>
+                        )}
+                        <button 
+                          className="btn btn-ghost btn-sm text-base-content"
+                          onClick={() => handleDownload(item as typeof folders[0])}
+                        >
+                          <FaDownload className="h-4 w-4 sm:h-5 sm:w-5" />
+                        </button>
+                        <button className="btn btn-ghost btn-sm text-base-content">
+                          <FaCopy className="h-4 w-4 sm:h-5 sm:w-5" />
+                        </button>
+                        <button 
+                          className="btn btn-ghost btn-sm text-error"
+                          onClick={() => handleDelete(item)}
+                        >
+                          <FaTrash className="h-4 w-4 sm:h-5 sm:w-5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Sticky Pagination */}
+          <div className="sticky bottom-0 bg-base-200 p-4 border-t border-base-300">
+            <div className="flex justify-center flex-wrap gap-2">
+              <button
+                className="btn btn-sm"
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+              >
+                Previous
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                <button
+                  key={page}
+                  className={`btn btn-sm ${currentPage === page ? 'btn-primary' : ''}`}
+                  onClick={() => handlePageChange(page)}
+                >
+                  {page}
+                </button>
+              ))}
+              <button
+                className="btn btn-sm"
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <FilePreviewSidebar
+        file={selectedFile?.metadata || null}
+        onClose={() => setSelectedFile(null)}
+      />
+      
+      <FileModal />
+
+      {/* Upload Progress Toast */}
+      {isUploading && (
+        <div className="toast toast-end">
+          <div className="alert alert-info">
+            <div>
+              <span>Uploading...</span>
+              <progress 
+                className="progress progress-info w-56" 
+                value={uploadProgress} 
+                max="100"
+              ></progress>
+              <span>{uploadProgress}%</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <PreviewModal 
+        previewModal={previewModal} 
+        setPreviewModal={setPreviewModal} 
+      />
     </div>
   );
 }
+
+// Update the PreviewModal component definition
+const PreviewModal = ({ 
+  previewModal, 
+  setPreviewModal 
+}: { 
+  previewModal: { isOpen: boolean; url: string; type: string; fileName: string; }; 
+  setPreviewModal: React.Dispatch<React.SetStateAction<{ isOpen: boolean; url: string; type: string; fileName: string; }>>;
+}) => (
+  <dialog id="preview_modal" className={`modal ${previewModal.isOpen ? 'modal-open' : ''}`}>
+    <div className="modal-box max-w-4xl h-auto">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="font-bold text-lg truncate">{previewModal.fileName}</h3>
+        <button 
+          className="btn btn-sm btn-circle btn-ghost"
+          onClick={() => setPreviewModal({
+            isOpen: false,
+            url: '',
+            type: '',
+            fileName: ''
+          })}
+        >✕</button>
+      </div>
+      <div className="mt-4">
+        {previewModal.type === 'video' && (
+          <video controls className="w-full">
+            <source src={previewModal.url} />
+            Your browser does not support the video tag.
+          </video>
+        )}
+        {previewModal.type === 'image' && (
+          <img src={previewModal.url} alt={previewModal.fileName} className="w-full" />
+        )}
+        {previewModal.type === 'pdf' && (
+          <iframe
+            src={previewModal.url}
+            className="w-full h-[70vh]"
+            title={previewModal.fileName}
+          />
+        )}
+        {previewModal.type === 'audio' && (
+          <audio controls className="w-full">
+            <source src={previewModal.url} />
+            Your browser does not support the audio tag.
+          </audio>
+        )}
+      </div>
+    </div>
+    <form method="dialog" className="modal-backdrop">
+      <button onClick={() => setPreviewModal({
+        isOpen: false,
+        url: '',
+        type: '',
+        fileName: ''
+      })}>close</button>
+    </form>
+  </dialog>
+);

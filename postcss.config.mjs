@@ -1,8 +1,14 @@
-/** @type {import('postcss-load-config').Config} */
-const config = {
+// Change from CommonJS format:
+// module.exports = {
+//   plugins: {
+//     tailwindcss: {},
+//     autoprefixer: {},
+//   },
+// }
+
+// To ESM format:
+export default {
   plugins: {
     tailwindcss: {},
-  },
-};
-
-export default config;
+  }
+}

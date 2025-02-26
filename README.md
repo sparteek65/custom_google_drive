@@ -98,7 +98,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👥 Authors
 
-- Your Name - [GitHub Profile](https://github.com/yourusername)
+- Your Name - [GitHub Profile](https://github.com/sparteek65)
 
 ## 🙏 Acknowledgments
 
@@ -109,5 +109,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 <p align="center">
-  Made with ❤️ by [Your Name]
+  Made by Parteek Sharma and Anuhhav Tomar
 </p>

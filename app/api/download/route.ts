@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { generateDownloadUrl } from '@/lib/googleCloud';
+import { storageService } from '@/lib/services/storageService';
 
 export async function GET(request: Request) {
   try {
@@ -13,7 +13,7 @@ export async function GET(request: Request) {
       );
     }
 
-    const signedUrl = await generateDownloadUrl(filePath);
+    const signedUrl = await storageService.generateDownloadUrl(filePath);
     
     return NextResponse.json({ url: signedUrl });
   } catch (error) {
@@ -23,4 +23,4 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
-} 
+}

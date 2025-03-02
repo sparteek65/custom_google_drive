@@ -12,7 +12,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Process files one by one, but in a single response
-    const results = [];
+    const results = []; 
+    // ## testing
     
     for (const file of files) {
       try {

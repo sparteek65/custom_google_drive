@@ -23,6 +23,9 @@ import {
 import Link from 'next/link';
 import FilePreviewSidebar from '../components/FilePreviewSidebar';
 import { getFileType } from '../app/utils/fileHandler';
+import FolderSelector from '@/components/FolderSelector';
+import BulkUploader from '@/components/BulkUploader';
+import FloatingUploadPanel from '@/components/FloatingUploadPanel';
 
 export interface FileSystemItem {
   name: string;
@@ -85,6 +88,9 @@ export default function Home() {
     type: '',
     fileName: ''
   });
+  const [selectedUploadFolder, setSelectedUploadFolder] = useState('');
+  const [isBulkUploadVisible, setIsBulkUploadVisible] = useState(false);
+  const [isPollingActive, setIsPollingActive] = useState(false);
 
   // Update useEffect to fetch data when path changes
   useEffect(() => {
@@ -358,14 +364,9 @@ export default function Home() {
     const form = e.target as HTMLFormElement;
     const fileInput = form.querySelector('input[type="file"]') as HTMLInputElement;
     const urlInput = form.querySelector('input[name="httpUrl"]') as HTMLInputElement;
-    const folderNameInput = form.querySelector('input[type="text"]') as HTMLInputElement;
     
-    let targetFolder = folderNameInput.value || selectedFolder || '';
+    let targetFolder = selectedUploadFolder || '';
     
-    if (!targetFolder) {
-      targetFolder = '';
-    }
-
     // Check if we're uploading via URL or file
     if (urlInput.value) {
       try {
@@ -397,7 +398,7 @@ export default function Home() {
       return;
     }
 
-    // Existing file upload logic
+    // File upload logic
     if (!fileInput.files?.length) {
       alert('Please select a file or provide an HTTP URL');
       return;
@@ -407,72 +408,50 @@ export default function Home() {
     
     try {
       setIsUploading(true);
-      console.log('Getting presigned URL for:', file.name, 'in folder:', targetFolder, 'type:', file.type);
       
-      // Get presigned URL with content type
-      const presignedUrlResponse = await fetch('/api/upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fileName: file.name,
-          folderName: targetFolder,
-          contentType: file.type // Add content type to the request
-        }),
-      });
-
-      if (!presignedUrlResponse.ok) {
-        const errorData = await presignedUrlResponse.json();
-        throw new Error(`Failed to get presigned URL: ${JSON.stringify(errorData)}`);
-      }
-
-      const { uploadUrl } = await presignedUrlResponse.json();
-      console.log('Received presigned URL:', uploadUrl);
-
-      // Upload file with progress tracking using XMLHttpRequest
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        
-        xhr.upload.addEventListener('progress', (event) => {
-          if (event.lengthComputable) {
-            const progress = (event.loaded / event.total) * 100;
-            setUploadProgress(Math.round(progress));
-          }
-        });
-
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            console.log('Upload completed successfully');
-            resolve(xhr.response);
-          } else {
-            console.error('Upload failed with status:', xhr.status);
-            console.error('Response:', xhr.responseText);
-            reject(new Error(`Upload failed with status: ${xhr.status}`));
-          }
-        });
-
-        xhr.addEventListener('error', (e) => {
-          console.error('XHR error:', e);
-          reject(new Error('Network error during upload'));
-        });
-
-        xhr.open('PUT', uploadUrl);
-        xhr.setRequestHeader('Content-Type', file.type);
-        // Add content length header
-        xhr.setRequestHeader('Content-Length', file.size.toString());
-        console.log('Starting upload with content-type:', file.type, 'size:', file.size);
-        xhr.send(file);
-      });
-
-      console.log('Upload completed, refreshing folders');
-      // await refreshFolders();
-      setIsUploadModalOpen(false);
-      setUploadProgress(0);
+      // Create FormData
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folderName', targetFolder);
+      
+      // Track upload progress with XHR
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload-proxy');
+      
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const progress = (event.loaded / event.total) * 100;
+          setUploadProgress(Math.round(progress));
+        }
+      };
+      
+      xhr.onload = async () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          console.log('Upload completed successfully');
+          // Refresh file structure
+          const response = await fetch('/api/file-structure');
+          const data = await response.json();
+          setFileStructure(data);
+          updateCurrentItems(data, currentPath);
+          setIsUploadModalOpen(false);
+        } else {
+          console.error('Upload failed:', xhr.responseText);
+          alert(`Upload failed: ${xhr.statusText}`);
+        }
+        setIsUploading(false);
+      };
+      
+      xhr.onerror = () => {
+        console.error('Upload request failed');
+        alert('Upload failed due to a network error');
+        setIsUploading(false);
+      };
+      
+      xhr.send(formData);
+      
     } catch (error) {
       console.error('Upload failed:', error);
       alert(`Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
       setIsUploading(false);
     }
   };
@@ -532,6 +511,35 @@ export default function Home() {
     }
   };
 
+  // Inside your component, add this log
+  useEffect(() => {
+    console.log('Selected upload folder:', selectedUploadFolder);
+  }, [selectedUploadFolder]);
+
+  const refreshFileStructure = async () => {
+    try {
+      console.log('Refreshing file structure...');
+      const response = await fetch('/api/file-structure');
+      const data = await response.json();
+      setFileStructure(data);
+      updateCurrentItems(data, currentPath);
+      console.log('File structure refreshed successfully');
+    } catch (error) {
+      console.error('Error refreshing file structure:', error);
+    }
+  };
+
+  // Set up polling when uploads are in progress
+  useEffect(() => {
+    if (!isPollingActive) return;
+    
+    const pollInterval = setInterval(() => {
+      refreshFileStructure();
+    }, 10000); // Poll every 10 seconds
+    
+    return () => clearInterval(pollInterval);
+  }, [isPollingActive]);
+
   return (
     <div className="flex h-screen bg-base-100">
       <div className="flex-1 p-2 sm:p-6 flex flex-col">
@@ -569,12 +577,20 @@ export default function Home() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <button 
-              className="btn btn-primary btn-outline"
-              onClick={() => setIsUploadModalOpen(true)}
-            >
-              <FaUpload className="mr-2" /> Upload
-            </button>
+            <div className="flex space-x-2">
+              <button 
+                className="btn btn-primary btn-outline"
+                onClick={() => setIsUploadModalOpen(true)}
+              >
+                <FaUpload className="mr-2" /> Upload
+              </button>
+              <button 
+                className="btn btn-primary"
+                onClick={() => setIsBulkUploadVisible(true)}
+              >
+                <FaUpload className="mr-2" /> Bulk Upload
+              </button>
+            </div>
           </div>
         </div>
 
@@ -583,37 +599,16 @@ export default function Home() {
           <div className="modal-box">
             <h3 className="font-bold text-lg mb-4">Upload File</h3>
             <form onSubmit={handleUpload} className="space-y-4">
-              <div className="form-control w-full">
+              <div className="form-control">
                 <label className="label">
-                  <span className="label-text">Select Folder</span>
+                  <span className="label-text">Destination Folder</span>
                 </label>
-                <select 
-                  className="select select-bordered w-full"
-                  value={selectedFolder}
-                  onChange={(e) => setSelectedFolder(e.target.value)}
-                >
-                  <option value="" disabled>Select a folder</option>
-                  {folders
-                    .filter(f => !f.name.includes('.'))
-                    .map((folder, index) => (
-                      <option key={index} value={folder.name}>
-                        {folder.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div className="form-control w-full">
-                <label className="label">
-                  <span className="label-text">Or Create New Folder</span>
-                </label>
-                <input 
-                  type="text"
-                  placeholder="Enter folder name" 
-                  className="input input-bordered w-full" 
+                <FolderSelector 
+                  selectedFolder={selectedUploadFolder} 
+                  onFolderSelect={setSelectedUploadFolder} 
                 />
               </div>
-              
+
               <div className="form-control w-full">
                 <label className="label">
                   <span className="label-text">HTTP URL</span>
@@ -662,6 +657,23 @@ export default function Home() {
             <button onClick={() => setIsUploadModalOpen(false)}>close</button>
           </form>
         </dialog>
+
+        {/* Floating Upload Panel */}
+        <FloatingUploadPanel
+          isOpen={isBulkUploadVisible}
+          onClose={() => {
+            setIsBulkUploadVisible(false);
+            setIsPollingActive(false);
+          }}
+          onComplete={() => {
+            refreshFileStructure();
+            setIsBulkUploadVisible(false);
+            setIsPollingActive(false);
+          }}
+          onUploadStart={() => {
+            setIsPollingActive(true);
+          }}
+        />
 
         {/* Table with vertical scroll */}
         <div className="flex-1 overflow-hidden flex flex-col bg-base-200 rounded-lg">
@@ -822,6 +834,11 @@ export default function Home() {
         previewModal={previewModal} 
         setPreviewModal={setPreviewModal} 
       />
+
+      {/* Debug output */}
+      <div className="text-xs text-gray-500 mt-2">
+        Selected folder: {selectedUploadFolder || '(root)'}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { deleteFile } from '@/lib/googleCloud';
+import { storageService } from '@/lib/services/storageService';
 
 export async function DELETE(
   request: Request,
@@ -12,7 +12,7 @@ export async function DELETE(
       .trim();
     
     console.log('Deleting file:', filePath);
-    await deleteFile(filePath);
+    await storageService.deleteFile(filePath);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting file:', error);
